@@ -9,6 +9,7 @@ using static fdata_dump.RDB_NameHash;
 
 using p5spclib;
 using p5spclib.Model.Intermediate;
+using System.Net;
 
 namespace fdata_dump
 {
@@ -48,7 +49,6 @@ namespace fdata_dump
 
             var optionalArgs = new Dictionary<string, bool>
             {
-                { "-fe", false }, // FEW Three Hopes mode
                 { "-l", false }   // Logging mode
             };
 
@@ -65,8 +65,24 @@ namespace fdata_dump
                 }
             }
 
+            bool gustToolsExists = Directory.Exists("Gust_Tools");
+            if (!gustToolsExists)
+            {
+                Console.WriteLine("Gust_Tools not found.\nDo you wish to download it? (y/n)");
+                string input = Console.ReadLine();
+                if (input.ToLower()[0].ToString() =="y")
+                {
+                    Directory.CreateDirectory("Gust_Tools/");
+                    await DownloadGustTools("https://github.com/VitaSmith/gust_tools/releases/latest/download/gust_tools.zip", "Gust_Tools/gust_tools.zip", 5);
+                    Directory.CreateDirectory("Gust_Tools/bin/");
+                    System.IO.Compression.ZipFile.ExtractToDirectory("Gust_Tools/gust_tools.zip", "Gust_Tools/bin");
+                }
+
+            }
+
+
             // Access the optional arguments
-            bool isFE = optionalArgs["-fe"];
+            bool isFE = true;
             bool disableLogging = optionalArgs["-l"];
 
             if (disableLogging) Log = false;
@@ -104,20 +120,12 @@ namespace fdata_dump
 
             // Process .name files first
             Console.WriteLine("Attempting to find and process .name files...");
-            if (isFE)
+            //if (isFE)
+            foreach (string filePath in debugFiles)
             {
-                foreach (string filePath in debugFiles)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
-                }
+                tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
             }
-            else
-            {
-                foreach (string filePath in debugFiles)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsync(filePath)));
-                }
-            }
+
 
             await Task.WhenAll(tasks);
 
@@ -164,19 +172,10 @@ namespace fdata_dump
 
 
             Console.WriteLine("Attempting to Pre-process important FData files to obtain grouping info...");
-            if (isFE)
+            //if (isFE)
+            foreach (string filePath in sortedFilePaths)
             {
-                foreach (string filePath in sortedFilePaths)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
-                }
-            }
-            else
-            {
-                foreach (string filePath in sortedFilePaths)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsync(filePath)));
-                }
+                tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
             }
 
             await Task.WhenAll(tasks);
@@ -208,21 +207,13 @@ namespace fdata_dump
             timer.Restart();
 
             Console.WriteLine("Processing FData files...");
-            if (isFE)
+            //if (isFE)
+            Console.WriteLine("FEW Three Hopes mode enabled.");
+            foreach (string filePath in filePaths)
             {
-                Console.WriteLine("FEW Three Hopes mode enabled.");
-                foreach (string filePath in filePaths)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
-                }
+                tasks.Add(Task.Run(() => ProcessFileAsyncFE(filePath)));
             }
-            else
-            {
-                foreach (string filePath in filePaths)
-                {
-                    tasks.Add(Task.Run(() => ProcessFileAsync(filePath)));
-                }
-            }
+
 
             await Task.WhenAll(tasks);
 
@@ -289,7 +280,8 @@ namespace fdata_dump
                 using (BinaryReader reader = new BinaryReader(File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
                 {
                     reader.BaseStream.Position = 0x10;
-                    if (Log) Console.WriteLine($"Processing FData file {Path.GetFileName(filePath)}");
+                    string fileName = Path.GetFileName(filePath);
+                    if (Log) Console.WriteLine($"Processing FData file {fileName}");
 
                     long IDRKOffset = 0;
 
@@ -307,7 +299,7 @@ namespace fdata_dump
 
                         if (DEBUG) Console.WriteLine($"Expected filename is {fname}");
 
-                        string fullName = Path.Combine(inPath, "fdata_out", ext);
+                        string fullName = Path.Combine(inPath, "fdata_out", fileName, ext);
                         Directory.CreateDirectory(fullName);
                         string outputPath = Path.Combine(fullName, fname);
 
@@ -318,11 +310,15 @@ namespace fdata_dump
                         }
                         else
                         {
-                            if (Log) Console.WriteLine($"Extracting FData file {Path.GetFileName(filePath)} target file {fname}");
+                            if (Log) Console.WriteLine($"Extracting FData file {fileName} target file {fname}");
                         }
 
+                        string configPath = Path.Combine(inPath, "fdata_out", fileName, "config.json");
+                        //Console.WriteLine($"{configPath}");
                         if (entry.CompSize == entry.FileSize)
                         {
+                            string config = "{\"Compressed\": false}";
+                            File.WriteAllText(configPath, config);
                             byte[] decompressedData = reader.ReadBytes((int)entry.FileSize);
                             using (FileStream output = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None))
                             {
@@ -332,6 +328,8 @@ namespace fdata_dump
                         }
                         else
                         {
+                            string config = "{\"Compressed\": true}";
+                            File.WriteAllText(configPath, config);
                             while (entry.FileSize > 0)
                             {
                                 uint zsize = reader.ReadUInt32();
@@ -386,8 +384,10 @@ namespace fdata_dump
             {
                 using (BinaryReader reader = new BinaryReader(File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
                 {
+                    string fileName = Path.GetFileName(filePath);
                     reader.BaseStream.Position = 0x10;
-                    if (Log) Console.WriteLine($"Processing FData file {Path.GetFileName(filePath)}");
+                    if (Log) Console.WriteLine($"Processing FData file {fileName}");
+                
 
                     long IDRKOffset = 0;
 
@@ -407,7 +407,7 @@ namespace fdata_dump
 
                         string groupFolder = "System";
 
-                        string fullName = Path.Combine(inPath, "fdata_out", GetTargetGroupingFolder(entry.FileKtid, entry.TypeInfoKtid), ext);
+                        string fullName = Path.Combine(inPath, "fdata_out", fileName, GetTargetGroupingFolder(entry.FileKtid, entry.TypeInfoKtid), ext);
                         Directory.CreateDirectory(fullName);
                         string outputPath = Path.Combine(fullName, fname);
 
@@ -418,11 +418,13 @@ namespace fdata_dump
                         }
                         else
                         {
-                            if (Log) Console.WriteLine($"Extracting FData file {Path.GetFileName(filePath)} target file {fname}");
+                            if (Log) Console.WriteLine($"Extracting FData file {fileName} target file {fname}");
                         }
-
+                        string configPath = Path.Combine(inPath, "fdata_out", fileName, "config.json");
+                        Console.WriteLine($"{configPath}");
                         if (entry.CompSize == entry.FileSize)
                         {
+                            File.WriteAllText(configPath, "{{\"Compressed\": false}}");
                             byte[] decompressedData = reader.ReadBytes((int)entry.FileSize);
                             using (FileStream output = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None))
                             {
@@ -432,6 +434,7 @@ namespace fdata_dump
                         }
                         else
                         {
+                            File.WriteAllText(configPath, "{{\"Compressed\": true}}");
                             while (entry.FileSize > 0)
                             {
                                 ushort zsize = reader.ReadUInt16();
@@ -470,7 +473,7 @@ namespace fdata_dump
                         if (DEBUG) Console.WriteLine();
                     }
 
-                    if (Log) Console.WriteLine($"Finished processing FData file {Path.GetFileName(filePath)}");
+                    if (Log) Console.WriteLine($"Finished processing FData file {fileName}");
                 }
             }
             catch (Exception ex)
@@ -498,6 +501,33 @@ namespace fdata_dump
                 return decompressedMemoryStream.ToArray();
             }
         }
+
+
+        public static byte[] CompressStream(byte[] decompressedData, int decompressedSize) //Needs work
+        {
+            Stream compressedStream = new MemoryStream(decompressedData, false);
+            using (MemoryStream decompressedMemoryStream = new MemoryStream(decompressedSize))
+            {
+                using (ZLibStream deflateStream = new ZLibStream(compressedStream, CompressionMode.Decompress))
+                {
+                    for (int i = 0; i < deflateStream.Length;)
+                    {
+
+                    }
+
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+
+                    while ((bytesRead = deflateStream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        decompressedMemoryStream.Write(buffer, 0, bytesRead);
+                    }
+                }
+
+                return decompressedMemoryStream.ToArray();
+            }
+        }
+
 
         static async Task<List<RDB_Names>> ProcessDotNameFiles(string filePath)
         {
@@ -791,5 +821,39 @@ namespace fdata_dump
                 return Encoding.UTF8.GetString(ms.ToArray());
             }
         }
+
+        public static async Task<bool> DownloadGustTools(string fileUrl, string destinationPath, int maxRetries = 3, TimeSpan? timeout = null)
+        {
+            var client = new HttpClient();
+            if (timeout.HasValue)
+                client.Timeout = timeout.Value;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    using var response = await client.GetAsync(fileUrl, HttpCompletionOption.ResponseHeadersRead);
+                    response.EnsureSuccessStatusCode();
+
+                    await using var contentStream = await response.Content.ReadAsStreamAsync();
+                    await using var fileStream = new FileStream(destinationPath, FileMode.Create);
+
+                    await contentStream.CopyToAsync(fileStream);
+                    //Directory.CreateDirectory("Gust_Tools/bin/");
+                    //System.IO.Compression.ZipFile.ExtractToDirectory("Gust_Tools/gust_tools.zip", "Gust_Tools/bin/");
+                    return true;
+                }
+                catch (Exception ex) when (attempt < maxRetries)
+                {
+                    Console.WriteLine($"Attempt {attempt} failed: {ex.Message}. Retrying...");
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt))); // Exponential backoff
+                }
+            }
+
+
+
+            return false;
+        }
+
     }
 }
